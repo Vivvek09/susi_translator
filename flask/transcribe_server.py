@@ -64,10 +64,11 @@ else:
 # In-memory storage for transcripts
 transcriptd = {} # should be a dictionary of dictionaries; the key is the tenant_id and the value is a dictionary with the chunk_id as key and the transcript as value
 audio_stack = queue.Queue() # is this a fifo queue? yes, it is, a FILO queue would be LifoQueue
+shutdown_flag = threading.Event()
 
 # Process audio data
 def process_audio():
-    while True:
+      while not shutdown_flag.is_set():
         tenant_id, chunk_id, audiob64 = audio_stack.get()
         logger.debug(f"Queue length: {audio_stack.qsize()}")
         # Skip forward in the stack until we find the last entry with the same chunk_id and the same tenant_id
@@ -169,10 +170,12 @@ def process_audio():
             clean_old_transcripts()
 
         # Mark the task as done
-        except Exception as e:
-            logger.error(f"Error processing audio chunk {chunk_id}", exc_info=True)
+        except queue.Empty:
+            continue  # If queue is empty, check shutdown flag
         finally:
-            audio_stack.task_done()
+            if not shutdown_flag.is_set() and 'audio_stack' in locals():
+                audio_stack.task_done()
+
 
 # Check if the transcript is valid: Contains at least one ASCII character and no forbidden words
 def is_valid(transcript):
@@ -192,6 +195,16 @@ def is_valid(transcript):
 
     # Return true only if both conditions are met
     return has_ascii_char and not contains_forbidden_phrases and not is_forbidden_string and not contains_long_words;
+
+def shutdown_server():
+    # Set the shutdown flag
+    shutdown_flag.set()
+    
+    # Wait for the processing thread to complete
+    audio_processing_thread.join(timeout=5.0)
+    
+    # Clean up any remaining resources
+    logger.info("Server shutting down")
 
 # Clean old transcripts: Remove all transcripts older than two hours
 def clean_old_transcripts():
@@ -520,7 +533,14 @@ class TranscriptsSize(Resource):
 
 if __name__ == '__main__':
     # Start the audio processing thread
-    threading.Thread(target=process_audio).start()
+    audio_processing_thread = threading.Thread(target=process_audio)
+    audio_processing_thread.daemon = True  # Makes the thread exit when main thread exits
+    audio_processing_thread.start()
+    print("Server started")
 
-    # start the server
-    app.run(host='0.0.0.0', port=5040, debug=True)
+
+    try:
+        # start the server
+        app.run(host='0.0.0.0', port=5040, debug=True)
+    finally:
+        shutdown_server()
