@@ -69,10 +69,11 @@ shutdown_flag = threading.Event()
 # Process audio data
 def process_audio():
       while not shutdown_flag.is_set():
-        tenant_id, chunk_id, audiob64 = audio_stack.get()
-        logger.debug(f"Queue length: {audio_stack.qsize()}")
-        # Skip forward in the stack until we find the last entry with the same chunk_id and the same tenant_id
+        
         try:
+            # Skip forward in the stack until we find the last entry with the same chunk_id and the same tenant_id
+            tenant_id, chunk_id, audiob64 = audio_stack.get()
+            logger.debug(f"Queue length: {audio_stack.qsize()}")
             # scan through the whole audio_stack to find any other entries with the same chunk_id and tenant_id
             # in case we find one, we skip the head and take the next one from the head of the queue and scan again
             while audio_stack.qsize() > 0:
@@ -172,10 +173,10 @@ def process_audio():
         # Mark the task as done
         except queue.Empty:
             continue  # If queue is empty, check shutdown flag
+        except Exception as e:
+            logger.error(f"Error processing audio chunk {chunk_id}", exc_info=True)
         finally:
-            if not shutdown_flag.is_set() and 'audio_stack' in locals():
-                audio_stack.task_done()
-
+            audio_stack.task_done()  # Always mark the task as done
 
 # Check if the transcript is valid: Contains at least one ASCII character and no forbidden words
 def is_valid(transcript):
