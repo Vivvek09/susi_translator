@@ -12,9 +12,12 @@ import torch
 import json
 import time
 import os
+from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+logger.info(f"Using device: {device}")
 
 app = Flask(__name__)
 api = Api(app, version='1.0', title='Transcription API',
@@ -60,6 +63,15 @@ else:
         model_smart = whisper.load_model(model_smart_name, in_memory=True, download_root=models_path)
     else:
         model_smart = whisper.load_model(model_smart_name, in_memory=True)
+
+try:
+    translation_model = M2M100ForConditionalGeneration.from_pretrained("facebook/m2m100_418M").to(device)
+    translation_tokenizer = M2M100Tokenizer.from_pretrained("facebook/m2m100_418M")
+    logger.info("Translation model loaded successfully")
+except Exception as e:
+    logger.error(f"Error loading translation model: {e}")
+    translation_model = None
+    translation_tokenizer = None
 
 # In-memory storage for transcripts
 transcriptd = {} # should be a dictionary of dictionaries; the key is the tenant_id and the value is a dictionary with the chunk_id as key and the transcript as value
@@ -173,6 +185,30 @@ def process_audio():
             logger.error(f"Error processing audio chunk {chunk_id}", exc_info=True)
         finally:
             audio_stack.task_done()
+
+def translate_text(text, target_language):
+    if not translation_model or not translation_tokenizer or not text:
+        return "", 0
+    
+    try: 
+        # Tokenize the text
+        encoded = translation_tokenizer(text, return_tensors="pt").to(device)
+
+        # Generate the translation
+        generated_tokens = translation_model.generate(
+            **encoded, 
+            forced_bos_token_id=translation_tokenizer.get_lang_id(target_language)
+        )
+        
+        # Decode the generated tokens
+        translated_text = translation_tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
+        
+        return translated_text
+        
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return ""
+
 
 # Check if the transcript is valid: Contains at least one ASCII character and no forbidden words
 def is_valid(transcript):
@@ -518,6 +554,25 @@ class TranscriptsSize(Resource):
         t = {k: v for k, v in t.items() if int(fromid) <= int(k) <= int(untilid)}
         return jsonify({'size': len(t)})
 
+@api.route('/translate')
+class Translate(Resource):
+    @api.doc(params={
+        'text': {'description': 'Text to translate', 'type': 'string'},
+        'target_language': {'description': 'Target language code (e.g., fr, es, de)', 'type': 'string'}
+    })
+    def get(self):
+        
+        text = request.args.get('text', '')
+        target_language = request.args.get('target_language', 'fr')
+        
+        translated_text = translate_text(text, target_language)
+        
+        return jsonify({
+            'original_text': text,
+            'translated_text': translated_text,
+            'target_language': target_language
+        })
+    
 if __name__ == '__main__':
     # Start the audio processing thread
     threading.Thread(target=process_audio).start()

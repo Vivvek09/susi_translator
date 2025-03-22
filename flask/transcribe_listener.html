@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<!--
+  <!--
 Copyright [2024] [Michael Peter Christen, mc@yacy.net]
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,85 +15,204 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -->
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Transcript Display</title>
-  <style>
-    body {
-      margin: 0;
-    }
-    #header {
-      padding: 10px;
-      box-sizing: border-box;
-    }
-    #transcript-container {
-      overflow-y: auto;
-      border: 1px solid #ccc;
-      padding: 10px;
-      box-sizing: border-box;
-    }
-  </style>
-</head>
-<body>
-  <h1>Transcript Display</h1>
-  <div id="header">
-    <input type="text" id="serverhost" placeholder="Transcribe Host" value="localhost">
-    <input type="text" id="serverport" placeholder="Transcribe Port" value="5040">
-    <button id="newsessionBtn">New Session</button>
-  </div>
-  <div id="transcript-container"></div>
-
-  <script>
-    let latestChunkId = null;
-    let transcriptContainer = document.getElementById('transcript-container');
-
-    function adjustTranscriptContainerHeight() {
-      const headerHeight = document.getElementById('header').offsetHeight;
-      const windowHeight = window.innerHeight;
-      transcriptContainer.style.height = (windowHeight - headerHeight - 80) + 'px';
-    }
-
-    document.getElementById('newsessionBtn').addEventListener('click', newSession);
-    async function newSession() {
-      while (transcriptContainer.firstChild) {
-        transcriptContainer.removeChild(transcriptContainer.firstChild);
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript Display with Translation</title>
+    <style>
+      body {
+        margin: 0;
       }
-      latestChunkId = null;
-    }
-    function getLatestTranscript() {
-      const serverhost = document.getElementById('serverhost').value;
-      const serverport = document.getElementById('serverport').value;
-      const get_latest_transcript_url = `http://${serverhost}:${serverport}/get_latest_transcript?sentences=true`;
-      fetch(get_latest_transcript_url)
-        .then(response => response.json())
-        .then(data => {
-          const chunkId = data.chunk_id;
-          const transcript = data.transcript;
+      #header {
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .container {
+        display: flex;
+        width: 100%;
+      }
+      .column {
+        width: 50%;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      .column-header {
+        font-weight: bold;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Transcript Display with Translation</h1>
+    <div id="header">
+      <input
+        type="text"
+        id="serverhost"
+        placeholder="Transcribe Host"
+        value="localhost"
+      />
+      <input
+        type="text"
+        id="serverport"
+        placeholder="Transcribe Port"
+        value="5040"
+      />
+      <select id="targetLanguage">
+        <option value="fr">French</option>
+        <option value="es">Spanish</option>
+        <option value="de">German</option>
+        <option value="zh">Chinese</option>
+        <option value="ja">Japanese</option>
+        <option value="ru">Russian</option>
+        <option value="ar">Arabic</option>
+        <option value="hi">Hindi</option>
+        <option value="pt">Portuguese</option>
+        <option value="it">Italian</option>
+      </select>
+      <button id="newsessionBtn">New Session</button>
+    </div>
+    <div class="container">
+      <div id="transcript-container" class="column">
+        <div class="column-header">Original Transcript</div>
+      </div>
+      <div id="translation-container" class="column">
+        <div class="column-header">Translation</div>
+      </div>
+    </div>
 
-          if (chunkId !== latestChunkId) {
-            // New chunk ID, add a new line to the transcript container
-            const newLine = document.createElement('div');
-            newLine.textContent = transcript;
-            transcriptContainer.appendChild(newLine);
-            latestChunkId = chunkId;
-          } else {
-            // Same chunk ID, update the existing transcript
-            transcriptContainer.lastChild.textContent = transcript;
+    <script>
+      let latestChunkId = null;
+      let transcriptContainer = document.getElementById("transcript-container");
+      let translationContainer = document.getElementById(
+        "translation-container"
+      );
+      let pendingTranslations = new Map();
+
+      function adjustContainerHeight() {
+        const headerHeight = document.getElementById("header").offsetHeight;
+        const windowHeight = window.innerHeight;
+        const height = windowHeight - headerHeight - 80 + "px";
+        transcriptContainer.style.height = height;
+        translationContainer.style.height = height;
+      }
+
+      document
+        .getElementById("newsessionBtn")
+        .addEventListener("click", newSession);
+
+      async function newSession() {
+        while (transcriptContainer.childNodes.length > 1) {
+          transcriptContainer.removeChild(transcriptContainer.lastChild);
+        }
+        while (translationContainer.childNodes.length > 1) {
+          translationContainer.removeChild(translationContainer.lastChild);
+        }
+        latestChunkId = null;
+        pendingTranslations.clear();
+      }
+
+      async function translate(text, id) {
+        if (!text.trim()) return;
+
+        const serverhost = document.getElementById("serverhost").value;
+        const serverport = document.getElementById("serverport").value;
+        const targetLanguage = document.getElementById("targetLanguage").value;
+
+        try {
+          const response = await fetch(
+            `http://${serverhost}:${serverport}/translate?text=${encodeURIComponent(
+              text
+            )}&target_language=${targetLanguage}`
+          );
+          const data = await response.json();
+
+          const translationDiv = document.getElementById(`translation-${id}`);
+          if (translationDiv) {
+            translationDiv.textContent = data.translated_text;
           }
 
-          // Scroll to the bottom of the transcript container
-          transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
-        })
-        .catch(error => console.error('Error fetching latest transcript:', error));
-    }
+          pendingTranslations.delete(id);
+        } catch (error) {
+          console.error("Translation error:", error);
+        }
+      }
 
-    // Adjust transcript container height on load and resize
-    window.addEventListener('load', adjustTranscriptContainerHeight);
-    window.addEventListener('resize', adjustTranscriptContainerHeight);
+      function getLatestTranscript() {
+        const serverhost = document.getElementById("serverhost").value;
+        const serverport = document.getElementById("serverport").value;
+        const get_latest_transcript_url = `http://${serverhost}:${serverport}/get_latest_transcript?sentences=true`;
+        fetch(get_latest_transcript_url)
+          .then((response) => response.json())
+          .then((data) => {
+            const chunkId = data.chunk_id;
+            const transcript = data.transcript;
 
-    // Fetch the latest transcript every second
-    setInterval(getLatestTranscript, 1000);
-  </script>
-</body>
+            if (chunkId === "-1" || !transcript) return;
+
+            if (chunkId !== latestChunkId) {
+              // New chunk ID, add a new line to both containers
+              const newLine = document.createElement("div");
+              newLine.id = `transcript-${chunkId}`;
+              newLine.textContent = transcript;
+              transcriptContainer.appendChild(newLine);
+
+              const newTranslationLine = document.createElement("div");
+              newTranslationLine.id = `translation-${chunkId}`;
+              if (!newTranslationLine.textContent || newTranslationLine.textContent === "Translating...") {
+                  newTranslationLine.textContent = "Translating...";
+              }
+              translationContainer.appendChild(newTranslationLine);
+
+              latestChunkId = chunkId;
+
+              // Queue translation
+              if (!pendingTranslations.has(chunkId)) {
+                pendingTranslations.set(chunkId, true);
+                translate(transcript, chunkId);
+              }
+            } else if (document.getElementById(`transcript-${chunkId}`)) {
+              // Same chunk ID, update existing transcript
+              const transcriptDiv = document.getElementById(
+                `transcript-${chunkId}`
+              );
+
+              // Only update and retranslate if text has changed
+              if (transcriptDiv.textContent !== transcript) {
+                transcriptDiv.textContent = transcript;
+
+                // Queue new translation if text has changed
+                if (!pendingTranslations.has(chunkId)) {
+                  pendingTranslations.set(chunkId, true);
+                  const translationDiv = document.getElementById(
+                    `translation-${chunkId}`
+                  );
+                  if (translationDiv && !translationDiv.textContent) {
+                      translationDiv.textContent = "Translating...";
+                  }
+                  translate(transcript, chunkId);
+                }
+              }
+            }
+
+            // Scroll to the bottom of both containers
+            transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+            translationContainer.scrollTop = translationContainer.scrollHeight;
+          })
+          .catch((error) =>
+            console.error("Error fetching latest transcript:", error)
+          );
+      }
+
+      // Adjust container height on load and resize
+      window.addEventListener("load", adjustContainerHeight);
+      window.addEventListener("resize", adjustContainerHeight);
+
+      // Fetch the latest transcript every second
+      setInterval(getLatestTranscript, 1000);
+    </script>
+  </body>
 </html>
